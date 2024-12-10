@@ -62,4 +62,8 @@ sim_res <- two_pop_tree_sim(n_per_pop, p, sigma_e, sigma_b)
 flash_obj <- flash(sim_res$Y, ebnm_fn = ebnm_point_normal, greedy_Kmax = 10)
 flash_obj2 <- update_flashier_F(flash_obj)
 ```
+This results in that the posterior variances are the same for each column of F.
 
+```{r}
+flash_obj2$flash_fit$EF2[[2]] - flash_obj2$flash_fit$EF[[2]]^2
+```
