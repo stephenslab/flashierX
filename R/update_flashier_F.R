@@ -11,13 +11,22 @@ update_flashier_F <- function(flash_obj) {
   WtW <- t(L) %*% L
   diag(WtW) <- colSums(L2)
   tau <- flash_fit_get_tau(flash_obj$flash_fit)
-  Sigma <- tau * WtW
-  diag(Sigma) <- diag(Sigma) + 1
-  Sigma <- chol2inv(chol(Sigma))
+  Sigma.inv <- tau * WtW
+  diag(Sigma.inv) <- diag(Sigma.inv) + 1
+  Sigma <- chol2inv(chol(Sigma.inv))
+  # F_pm <- tau * t(chol.solve(Sigma.inv, t(L) %*% Y))
   F_pm <- tau * t(Y) %*% L %*% Sigma
   F_p2m <- sweep(F_pm^2, 2, diag(Sigma), "+")
   flash_obj$flash_fit$EF[[2]] <- F_pm
   flash_obj$F_pm <- F_pm
   flash_obj$flash_fit$EF2[[2]] <- F_p2m
   return(flash_obj)
+}
+
+#' Cholesky solver of Ax=B.
+chol.solve <- function(A, B) {
+  R_chol <- chol(A)
+  y <- forwardsolve(t(R_chol), B)
+  x <- backsolve(R_chol, y)
+  return(x)
 }
