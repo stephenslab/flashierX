@@ -1,0 +1,188 @@
+---
+title: "example1"
+output: pdf_document
+date: "2025-02-04"
+---
+
+## Simulate data
+
+```{r}
+# taken from
+# https://github.com/stephenslab/drift.alpha/blob/master/R/simulate.R
+two_pop_tree_sim <- function(n_per_pop, p, sigma_e, sigma_b=rep(1, 3)){
+
+  if(length(sigma_b) != 3){
+    stop("There can only be 3 branch lengths i.e. factors")
+  }
+
+  # number of individuals
+  n <- n_per_pop * 2
+
+  # loadings matrix which specifies the topology
+  L <- matrix(0, nrow=n, ncol=3)
+  L[ ,1] <- 1
+  L[1:n_per_pop, 2] <- 1
+  L[(n_per_pop + 1):(2 * n_per_pop), 3] <- 1
+
+  # drift on each branch
+  F <- matrix(NA, nrow=p, ncol=3)
+  for(k in 1:3){
+    F[ ,k] <- rnorm(p, 0, sigma_b[k])
+  }
+
+  # errors
+  if (length(sigma_e) == 1) {
+    E <- matrix(rnorm(n*p, 0, sigma_e), nrow=n, ncol=p)
+  } else if (length(sigma_e) == n) {
+    E <- matrix(0, nrow=n, ncol=p)
+    for (i in 1:n) {
+      E[i,] <- rnorm(p, 0, sigma_e[i])
+    }
+  } else {
+    E <- matrix(0, nrow=n, ncol=p)
+    for (j in 1:p) {
+      E[,j] <- rnorm(n, 0, sigma_e[j])
+    }
+  }
+
+  # data
+  Y <- L %*% t(F) + E
+
+  # simulation object
+  res <- list(Y=Y, L=L, F=F)
+  return(res)
+
+}
+```
+
+## Var type = 0
+
+```{r}
+set.seed(235)
+n_per_pop <- 50
+pops <- c(rep("Pop1", n_per_pop), rep("Pop2", n_per_pop))
+sigma_e <- 1.0
+sigma_b <- c(1.0, 1.0, 1.0)
+p = 50
+sim_res <- two_pop_tree_sim(n_per_pop, p, sigma_e, sigma_b)
+```
+
+
+### EBMF with joint update on F with normal priors
+
+```{r}
+library(flashier)
+library(devtools)
+load_all()
+library(flashierX)
+flash_obj <- flash(sim_res$Y, ebnm_fn = c(ebnm_point_laplace, ebnm_normal), greedy_Kmax = 10, var_type = 0)
+cat('Initial elbo: ', flash_obj$elbo, '\n')
+flash_obj <- flash_backfitX(flash_obj)
+```
+
+### Regular EBMF with sequential update on F with normal priors
+
+```{r}
+flash_obj_old <- flash(sim_res$Y, ebnm_fn = c(ebnm_point_laplace, ebnm_normal), greedy_Kmax = 10, backfit = T, var_type = 0)
+flash_obj_old$elbo
+```
+
+### Comparison
+
+```{r}
+plot(flash_obj$elbo.df)
+norm(sim_res$Y %*% t(sim_res$Y) / 100 - flash_obj$L_pm %*% t(flash_obj$L_pm))
+norm(sim_res$Y %*% t(sim_res$Y) / 100 - flash_obj_old$L_pm %*% t(flash_obj_old$L_pm))
+norm(sim_res$Y - flash_obj$L_pm %*% t(flash_obj$F_pm))
+norm(sim_res$Y - flash_obj_old$L_pm %*% t(flash_obj_old$F_pm))
+heatmap(flash_obj$L_pm, Rowv = NA, Colv = NA, scale = "column", col = heat.colors(256), margins = c(5, 5))
+heatmap(flash_obj_old$L_pm, Rowv = NA, Colv = NA, scale = "column", col = heat.colors(256), margins = c(5, 5))
+```
+
+## Var type = 1
+
+```{r}
+set.seed(235)
+n_per_pop <- 50
+pops <- c(rep("Pop1", n_per_pop), rep("Pop2", n_per_pop))
+sigma_e <- rep((1:4) / 4, 25)
+sigma_b <- c(1.0, 1.0, 1.0)
+p = 50
+sim_res <- two_pop_tree_sim(n_per_pop, p, sigma_e, sigma_b)
+```
+
+
+### EBMF with joint update on F with normal priors
+
+```{r}
+library(flashier)
+library(devtools)
+load_all()
+library(flashierX)
+flash_obj <- flash(sim_res$Y, ebnm_fn = c(ebnm_point_laplace, ebnm_normal), greedy_Kmax = 10, var_type = 1)
+cat('Initial elbo: ', flash_obj$elbo, '\n')
+flash_obj <- flash_backfitX(flash_obj)
+```
+
+### Regular EBMF with sequential update on F with normal priors
+
+```{r}
+flash_obj_old <- flash(sim_res$Y, ebnm_fn = c(ebnm_point_laplace, ebnm_normal), greedy_Kmax = 10, backfit = T, var_type = 1)
+flash_obj_old$elbo
+```
+
+### Comparison
+
+```{r}
+plot(flash_obj$elbo.df)
+norm(sim_res$Y %*% t(sim_res$Y) / 100 - flash_obj$L_pm %*% t(flash_obj$L_pm))
+norm(sim_res$Y %*% t(sim_res$Y) / 100 - flash_obj_old$L_pm %*% t(flash_obj_old$L_pm))
+norm(sim_res$Y - flash_obj$L_pm %*% t(flash_obj$F_pm))
+norm(sim_res$Y - flash_obj_old$L_pm %*% t(flash_obj_old$F_pm))
+heatmap(flash_obj$L_pm, Rowv = NA, Colv = NA, scale = "column", col = heat.colors(256), margins = c(5, 5))
+heatmap(flash_obj_old$L_pm, Rowv = NA, Colv = NA, scale = "column", col = heat.colors(256), margins = c(5, 5))
+```
+
+## Var type = 2
+
+```{r}
+set.seed(235)
+n_per_pop <- 50
+pops <- c(rep("Pop1", n_per_pop), rep("Pop2", n_per_pop))
+sigma_e <- rep((1:5) / 5, 10)
+sigma_b <- c(1.0, 1.0, 1.0)
+p = 50
+sim_res <- two_pop_tree_sim(n_per_pop, p, sigma_e, sigma_b)
+```
+
+
+### EBMF with joint update on F with normal priors
+
+```{r}
+library(flashier)
+library(devtools)
+load_all()
+library(flashierX)
+flash_obj <- flash(sim_res$Y, ebnm_fn = c(ebnm_point_laplace, ebnm_normal), greedy_Kmax = 10, var_type = 2)
+cat('Initial elbo: ', flash_obj$elbo, '\n')
+flash_obj <- flash_backfitX(flash_obj)
+```
+
+### Regular EBMF with sequential update on F with normal priors
+
+```{r}
+flash_obj_old <- flash(sim_res$Y, ebnm_fn = c(ebnm_point_laplace, ebnm_normal), greedy_Kmax = 10, backfit = T, var_type = 2)
+flash_obj_old$elbo
+```
+
+### Comparison
+
+```{r}
+plot(flash_obj$elbo.df)
+norm(sim_res$Y %*% t(sim_res$Y) / 100 - flash_obj$L_pm %*% t(flash_obj$L_pm))
+norm(sim_res$Y %*% t(sim_res$Y) / 100 - flash_obj_old$L_pm %*% t(flash_obj_old$L_pm))
+norm(sim_res$Y - flash_obj$L_pm %*% t(flash_obj$F_pm))
+norm(sim_res$Y - flash_obj_old$L_pm %*% t(flash_obj_old$F_pm))
+heatmap(flash_obj$L_pm, Rowv = NA, Colv = NA, scale = "column", col = heat.colors(256), margins = c(5, 5))
+heatmap(flash_obj_old$L_pm, Rowv = NA, Colv = NA, scale = "column", col = heat.colors(256), margins = c(5, 5))
+```
