@@ -1,0 +1,144 @@
+---
+title: "example2"
+output: pdf_document
+date: "2025-03-12"
+---
+
+### two population sims
+
+```{r}
+# taken from
+# https://github.com/stephenslab/drift.alpha/blob/master/R/simulate.R
+two_pop_tree_sim <- function(n_per_pop, p, sigma_e, sigma_b=rep(1, 3)){
+
+  if(length(sigma_b) != 3){
+    stop("There can only be 3 branch lengths i.e. factors")
+  }
+
+  # number of individuals
+  n <- n_per_pop * 2
+
+  # loadings matrix which specifies the topology
+  L <- matrix(0, nrow=n, ncol=3)
+  L[ ,1] <- 1
+  L[1:n_per_pop, 2] <- 1
+  L[(n_per_pop + 1):(2 * n_per_pop), 3] <- 1
+
+  # drift on each branch
+  F <- matrix(NA, nrow=p, ncol=3)
+  for(k in 1:3){
+    F[ ,k] <- rnorm(p, 0, sigma_b[k])
+  }
+
+  # errors
+  if (length(sigma_e) == 1) {
+    E <- matrix(rnorm(n*p, 0, sigma_e), nrow=n, ncol=p)
+  } else if (length(sigma_e) == n) {
+    E <- matrix(0, nrow=n, ncol=p)
+    for (i in 1:n) {
+      E[i,] <- rnorm(p, 0, sigma_e[i])
+    }
+  } else {
+    E <- matrix(0, nrow=n, ncol=p)
+    for (j in 1:p) {
+      E[,j] <- rnorm(n, 0, sigma_e[j])
+    }
+  }
+
+  # data
+  Y <- L %*% t(F) + E
+
+  # simulation object
+  res <- list(Y=Y, L=L, F=F)
+  return(res)
+
+}
+```
+
+```{r}
+set.seed(235)
+n_per_pop <- 50
+pops <- c(rep("Pop1", n_per_pop), rep("Pop2", n_per_pop))
+sigma_e <- 1.0
+sigma_b <- c(1.0, 1.0, 1.0)
+p = 50
+sim_res <- two_pop_tree_sim(n_per_pop, p, sigma_e, sigma_b)
+```
+
+
+#### EBMF with joint update on F with normal priors
+
+```{r}
+library(flashier)
+library(devtools)
+load_all()
+flash_obj <- flash(sim_res$Y,
+                   ebnm_fn = c(ebnm_point_laplace, flash_ebnm('normal', mode = 0, scale = 1)),
+                   greedy_Kmax = 10, var_type = 0)
+cat('Initial elbo: ', flash_obj$elbo, '\n')
+```
+
+```{r}
+library(devtools)
+load_all()
+print('\n')
+f <- init_from_flash(flash_obj, joint_F = TRUE)
+flash_obj_joint_F <- flashierX(f, maxiter = 1000, joint_F = T, tol = flash_obj$flash_fit$conv.tol)
+flash_obj_joint_F_update_tau <- flashierX(f, maxiter = 1000, joint_F = T, update_s2_after_F = T, tol = flash_obj$flash_fit$conv.tol)
+flash_obj_sequent_F <- flashierX(f, maxiter = 1000, joint_F = F, tol = flash_obj$flash_fit$conv.tol)
+```
+
+
+
+#### Regular EBMF with sequential update on F with normal priors
+
+```{r}
+flash_obj_classic <- flash_backfit(flash_obj, verbose = 2, extrapolate = F, maxiter = 1000)
+flash_obj_classic$elbo
+```
+
+#### Comparison
+
+##### ELBO plots
+```{r}
+colors <- c("red", "blue", "green", "purple", "orange")
+
+plot(flash_obj_joint_F$elbo.df$iter, flash_obj_joint_F$elbo.df$elbo,
+     type = "l", col = colors[1], lwd = 2,
+     xlab = "Iteration", ylab = "ELBO",
+     main = "ELBO Convergence for Different Methods",
+     ylim = range(c(flash_obj_joint_F$elbo.df$elbo,
+                    flash_obj_joint_F_update_tau$elbo.df$elbo,
+                    flash_obj_sequent_F$elbo.df$elbo)))
+
+lines(flash_obj_joint_F_update_tau$elbo.df$iter, flash_obj_joint_F_update_tau$elbo.df$elbo,
+      col = colors[2], lwd = 2)
+lines(flash_obj_sequent_F$elbo.df$iter, flash_obj_sequent_F$elbo.df$elbo,
+      col = colors[3], lwd = 2)
+# lines(flash_obj_sequent_F_update_tau$elbo.df$iter, flash_obj_sequent_F_update_tau$elbo.df$elbo,
+#       col = colors[4], lwd = 2)
+# lines(flash_obj_imitate_classic$elbo.df$iter, flash_obj_imitate_classic$elbo.df$elbo,
+#       col = colors[5], lwd = 2)
+legend("bottomright", legend = c("Joint F", "Joint F (Update Tau)", "Sequent F"), 
+       col = colors, lwd = 2)
+```
+
+##### YYt/p - LLt
+
+```{r}
+cat('YYt/p - LLt', '\n')
+cat("joint F", norm(sim_res$Y %*% t(sim_res$Y) / p - flash_obj_joint_F$EL %*% t(flash_obj_joint_F$EL)), '\n')
+cat("sequent F", norm(sim_res$Y %*% t(sim_res$Y) / p - flash_obj_sequent_F$EL %*% t(flash_obj_sequent_F$EL)), '\n')
+cat("classic", norm(sim_res$Y %*% t(sim_res$Y) / p - flash_obj_classic$L_pm %*% t(flash_obj_classic$L_pm)), '\n')
+```
+
+
+##### heatmaps
+```{r}
+plot_heatmap(flash_obj_joint_F$EL, colors = c('blue','gray96', 'red'), brks = seq(-max(abs(flash_obj_joint_F$EL)), max(abs(flash_obj_joint_F$EL)), length.out = 50))
+
+plot_heatmap(flash_obj_sequent_F$EL, colors = c('blue','gray96', 'red'), brks = seq(-max(abs(flash_obj_sequent_F$EL)), max(abs(flash_obj_sequent_F$EL)), length.out = 50))
+
+plot_heatmap(sim_res$L, colors = c('blue','gray96', 'red'), brks = seq(-max(abs(sim_res$L)), max(abs(sim_res$L)), length.out = 50))
+
+```
